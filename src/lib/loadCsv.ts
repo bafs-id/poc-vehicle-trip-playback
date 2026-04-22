@@ -7,7 +7,7 @@ type Row = {
   CreatedDate: string;
 };
 
-const VEHICLE_MANIFEST_URL = "/vehicle_logs/index.json";
+const VEHICLE_MANIFEST_URL = `${import.meta.env.BASE_URL}vehicle_logs/index.json`;
 
 /** Fetch the manifest of vehicles produced by the vite-vehicle-manifest plugin. */
 export async function loadVehicleManifest(): Promise<Vehicle[]> {

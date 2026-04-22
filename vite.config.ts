@@ -11,6 +11,7 @@ import { resolve, basename, extname } from "node:path";
  */
 function vehicleManifestPlugin(): Plugin {
   const dir = resolve(__dirname, "public/vehicle_logs");
+  let base = "/";
   const writeManifest = () => {
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     const files = readdirSync(dir)
@@ -19,7 +20,7 @@ function vehicleManifestPlugin(): Plugin {
     const vehicles = files.map((fileName) => ({
       id: basename(fileName, extname(fileName)),
       fileName,
-      url: `/vehicle_logs/${fileName}`,
+      url: `${base}vehicle_logs/${fileName}`,
     }));
     writeFileSync(
       resolve(dir, "index.json"),
@@ -28,6 +29,9 @@ function vehicleManifestPlugin(): Plugin {
   };
   return {
     name: "vehicle-manifest",
+    configResolved(config) {
+      base = config.base;
+    },
     buildStart() {
       writeManifest();
     },
@@ -47,6 +51,7 @@ function vehicleManifestPlugin(): Plugin {
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: "/poc/vehicle-trip-placback/",
   plugins: [
     react(),
     babel({ presets: [reactCompilerPreset()] }),
