@@ -28,3 +28,5 @@ public/vehicle_logs/index.json
 *.njsproj
 *.sln
 *.sw?
+
+deploy.sh
