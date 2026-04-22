@@ -6,6 +6,7 @@ import type {
   RawPoint,
   SpeedingEvent,
   Trip,
+  Vehicle,
 } from "../types";
 import {
   DEFAULT_PLAYBACK_RATE,
@@ -14,13 +15,15 @@ import {
   type PlaybackRate,
 } from "../lib/constants";
 import { toLocalDateString } from "../lib/date";
-import { loadVehicleCsv } from "../lib/loadCsv";
+import { loadVehicleCsv, loadVehicleManifest } from "../lib/loadCsv";
 import { processPoints } from "../lib/processPoints";
 import { segmentTrips } from "../lib/segmentTrips";
 import { buildSpeedingEvents } from "../lib/speedingEvents";
 
 export type RouteState = {
   loadState: LoadState;
+  vehicles: Vehicle[];
+  selectedVehicleId: string | null;
   raw: RawPoint[];
   allPoints: Point[];
   trips: Trip[];
@@ -48,6 +51,7 @@ export type RouteState = {
 
 export type RouteActions = {
   loadData: () => Promise<void>;
+  selectVehicle: (id: string) => Promise<void>;
   setDate: (d: string | null) => void;
   setThreshold: (n: number) => void;
   play: () => void;
@@ -64,6 +68,8 @@ export type RouteStore = RouteState & RouteActions;
 
 export const useRouteStore = create<RouteStore>((set, get) => ({
   loadState: { status: "idle" },
+  vehicles: [],
+  selectedVehicleId: null,
   raw: [],
   allPoints: [],
   trips: [],
@@ -89,26 +95,32 @@ export const useRouteStore = create<RouteStore>((set, get) => ({
     if (get().loadState.status === "loading") return;
     set({ loadState: { status: "loading" } });
     try {
-      const raw = await loadVehicleCsv();
-      const points = processPoints(raw, get().thresholdKmh);
-      const trips = segmentTrips(points);
-      const events = buildSpeedingEvents(points);
-      const dates = uniqueDates(raw);
-      const initialDate = dates[dates.length - 1] ?? null;
-      const lastTripOnDate = lastTripFor(trips, initialDate);
-      set((s) => ({
-        loadState: { status: "ready" },
-        raw,
-        allPoints: points,
-        trips,
-        speedingEvents: events,
-        availableDates: dates,
-        date: initialDate,
-        selectedTripId: lastTripOnDate?.id ?? null,
-        playheadIndex: 0,
-        isPlaying: points.length < 2 ? false : s.isPlaying,
-        fitBoundsToken: s.fitBoundsToken + 1,
-      }));
+      const vehicles = await loadVehicleManifest();
+      if (vehicles.length === 0) {
+        set({
+          loadState: {
+            status: "error",
+            message: "No vehicles found in public/vehicle_logs/",
+          },
+        });
+        return;
+      }
+      set({ vehicles });
+      await loadVehicleData(vehicles[0], set, get);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      set({ loadState: { status: "error", message } });
+    }
+  },
+
+  selectVehicle: async (id) => {
+    const s = get();
+    if (id === s.selectedVehicleId) return;
+    const vehicle = s.vehicles.find((v) => v.id === id);
+    if (!vehicle) return;
+    set({ loadState: { status: "loading" } });
+    try {
+      await loadVehicleData(vehicle, set, get);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       set({ loadState: { status: "error", message } });
@@ -219,6 +231,41 @@ export const useRouteStore = create<RouteStore>((set, get) => ({
 
 // ---------- internal helpers ----------
 // Exported so selectors.ts can reuse them; not part of the public API.
+
+type Setter = (
+  partial: Partial<RouteStore> | ((s: RouteStore) => Partial<RouteStore>),
+) => void;
+type Getter = () => RouteStore;
+
+/** Run the full pipeline for a single vehicle and commit to the store. */
+async function loadVehicleData(
+  vehicle: Vehicle,
+  set: Setter,
+  get: Getter,
+): Promise<void> {
+  const raw = await loadVehicleCsv(vehicle.url);
+  const points = processPoints(raw, get().thresholdKmh);
+  const trips = segmentTrips(points);
+  const events = buildSpeedingEvents(points);
+  const dates = uniqueDates(raw);
+  const initialDate = dates[dates.length - 1] ?? null;
+  const lastTripOnDate = lastTripFor(trips, initialDate);
+  set((s) => ({
+    loadState: { status: "ready" },
+    selectedVehicleId: vehicle.id,
+    raw,
+    allPoints: points,
+    trips,
+    speedingEvents: events,
+    availableDates: dates,
+    date: initialDate,
+    selectedTripId: lastTripOnDate?.id ?? null,
+    selectedEventId: null,
+    playheadIndex: 0,
+    isPlaying: false,
+    fitBoundsToken: s.fitBoundsToken + 1,
+  }));
+}
 
 export function findTrip(trips: Trip[], id: string | null): Trip | null {
   if (!id) return null;

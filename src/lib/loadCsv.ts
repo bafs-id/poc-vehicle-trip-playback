@@ -1,5 +1,5 @@
 import Papa from "papaparse";
-import type { RawPoint } from "../types";
+import type { RawPoint, Vehicle } from "../types";
 
 type Row = {
   Latitude: string;
@@ -7,12 +7,20 @@ type Row = {
   CreatedDate: string;
 };
 
-const DEFAULT_CSV_URL = "/vehicle_locations.csv";
+const VEHICLE_MANIFEST_URL = "/vehicle_logs/index.json";
 
-/** Fetch the vehicle CSV and return parsed points sorted by timestamp. */
-export async function loadVehicleCsv(
-  url: string = DEFAULT_CSV_URL,
-): Promise<RawPoint[]> {
+/** Fetch the manifest of vehicles produced by the vite-vehicle-manifest plugin. */
+export async function loadVehicleManifest(): Promise<Vehicle[]> {
+  const res = await fetch(VEHICLE_MANIFEST_URL);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch vehicle manifest: ${res.status}`);
+  }
+  const data = (await res.json()) as { vehicles?: Vehicle[] };
+  return data.vehicles ?? [];
+}
+
+/** Fetch a vehicle CSV and return parsed points sorted by timestamp. */
+export async function loadVehicleCsv(url: string): Promise<RawPoint[]> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to fetch CSV: ${res.status}`);
   const text = await res.text();

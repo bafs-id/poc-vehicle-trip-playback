@@ -3,6 +3,9 @@ import { useRouteStore } from "../store/useRouteStore";
 
 export function Header() {
   const {
+    vehicles,
+    selectedVehicleId,
+    selectVehicle,
     date,
     availableDates,
     setDate,
@@ -13,6 +16,9 @@ export function Header() {
     selectTrip,
   } = useRouteStore(
     useShallow((s) => ({
+      vehicles: s.vehicles,
+      selectedVehicleId: s.selectedVehicleId,
+      selectVehicle: s.selectVehicle,
       date: s.date,
       availableDates: s.availableDates,
       setDate: s.setDate,
@@ -24,6 +30,8 @@ export function Header() {
     })),
   );
 
+  const isLoading = loadState.status === "loading";
+
   return (
     <header className="app-header">
       <div className="brand">
@@ -31,11 +39,29 @@ export function Header() {
       </div>
 
       <div className="control">
+        <label>Vehicle</label>
+        <select
+          value={selectedVehicleId ?? ""}
+          onChange={(e) => {
+            if (e.target.value) void selectVehicle(e.target.value);
+          }}
+          disabled={vehicles.length === 0 || isLoading}
+        >
+          {vehicles.length === 0 && <option value="">—</option>}
+          {vehicles.map((v) => (
+            <option key={v.id} value={v.id}>
+              {v.id}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="control">
         <label>Date</label>
         <select
           value={date ?? ""}
           onChange={(e) => setDate(e.target.value || null)}
-          disabled={availableDates.length === 0}
+          disabled={availableDates.length === 0 || isLoading}
         >
           {availableDates.length === 0 && <option value="">—</option>}
           {availableDates.map((d) => (

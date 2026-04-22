@@ -55,3 +55,11 @@ export type LoadState =
 
 /** Target for an imperative map fly-to. */
 export type FlyToTarget = LatLng & { zoom?: number };
+
+/** A vehicle discovered in public/vehicle_logs/. */
+export type Vehicle = {
+  /** Filename stem, e.g. "ZS-44". Used as a stable id and display label. */
+  id: string;
+  fileName: string;
+  url: string;
+};
