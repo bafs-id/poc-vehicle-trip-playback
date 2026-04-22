@@ -84,6 +84,12 @@ export const useRouteStore = create<State & Actions>((set, get) => ({
       const trips = segmentTrips(points);
       const events = buildSpeedingEvents(points);
       const dates = uniqueDates(raw);
+      const initialDate = dates[dates.length - 1] ?? null;
+      const tripsOnInitialDate = initialDate
+        ? trips.filter((t) => tripOnDate(t, initialDate))
+        : trips;
+      const lastTrip =
+        tripsOnInitialDate[tripsOnInitialDate.length - 1] ?? null;
       set({
         loadStatus: "ready",
         raw,
@@ -91,7 +97,8 @@ export const useRouteStore = create<State & Actions>((set, get) => ({
         trips,
         speedingEvents: events,
         availableDates: dates,
-        date: dates[0] ?? null,
+        date: initialDate,
+        selectedTripId: lastTrip?.id ?? null,
         playheadIndex: 0,
         fitBoundsToken: get().fitBoundsToken + 1,
       });
