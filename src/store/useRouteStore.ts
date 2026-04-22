@@ -66,6 +66,25 @@ export type RouteActions = {
 
 export type RouteStore = RouteState & RouteActions;
 
+const BASE_URL = import.meta.env.BASE_URL;
+
+/** Extract the vehicle id after BASE_URL, e.g. `/poc/vehicle-trip-placback/ZS-47` → `ZS-47`. */
+export function readVehicleIdFromUrl(): string | null {
+  if (typeof window === "undefined") return null;
+  const path = window.location.pathname;
+  const tail = path.startsWith(BASE_URL) ? path.slice(BASE_URL.length) : path;
+  const id = tail.split("/")[0];
+  return id || null;
+}
+
+function writeVehicleIdToUrl(id: string, opts: { replace: boolean }): void {
+  if (typeof window === "undefined") return;
+  const target = `${BASE_URL}${id}${window.location.search}${window.location.hash}`;
+  if (target === window.location.pathname + window.location.search + window.location.hash) return;
+  const fn = opts.replace ? "replaceState" : "pushState";
+  window.history[fn](null, "", target);
+}
+
 export const useRouteStore = create<RouteStore>((set, get) => ({
   loadState: { status: "idle" },
   vehicles: [],
@@ -106,7 +125,11 @@ export const useRouteStore = create<RouteStore>((set, get) => ({
         return;
       }
       set({ vehicles });
-      await loadVehicleData(vehicles[0], set, get);
+      const urlId = readVehicleIdFromUrl();
+      const target =
+        (urlId && vehicles.find((v) => v.id === urlId)) || vehicles[0];
+      await loadVehicleData(target, set, get);
+      writeVehicleIdToUrl(target.id, { replace: true });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       set({ loadState: { status: "error", message } });
@@ -121,6 +144,7 @@ export const useRouteStore = create<RouteStore>((set, get) => ({
     set({ loadState: { status: "loading" } });
     try {
       await loadVehicleData(vehicle, set, get);
+      writeVehicleIdToUrl(vehicle.id, { replace: false });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       set({ loadState: { status: "error", message } });

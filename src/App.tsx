@@ -4,18 +4,31 @@ import { Header } from "./components/Header";
 import { Sidebar } from "./components/Sidebar";
 import { RouteMap } from "./components/RouteMap";
 import { PlaybackBar } from "./components/PlaybackBar";
-import { useRouteStore } from "./store/useRouteStore";
+import { readVehicleIdFromUrl, useRouteStore } from "./store/useRouteStore";
 import { usePlaybackLoop } from "./hooks/usePlaybackLoop";
 import "./App.css";
 
 function App() {
-  const { loadState, loadData } = useRouteStore(
-    useShallow((s) => ({ loadState: s.loadState, loadData: s.loadData })),
+  const { loadState, loadData, selectVehicle } = useRouteStore(
+    useShallow((s) => ({
+      loadState: s.loadState,
+      loadData: s.loadData,
+      selectVehicle: s.selectVehicle,
+    })),
   );
 
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    const onPop = () => {
+      const id = readVehicleIdFromUrl();
+      if (id) selectVehicle(id);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [selectVehicle]);
 
   usePlaybackLoop();
 
