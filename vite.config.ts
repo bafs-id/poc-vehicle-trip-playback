@@ -12,7 +12,7 @@ import { resolve, basename, extname } from "node:path";
 function vehicleManifestPlugin(): Plugin {
   const dir = resolve(__dirname, "public/vehicle_logs");
   let base = "/";
-  const writeManifest = () => {
+  const buildManifest = () => {
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     const files = readdirSync(dir)
       .filter((f) => extname(f).toLowerCase() === ".csv")
@@ -22,9 +22,12 @@ function vehicleManifestPlugin(): Plugin {
       fileName,
       url: `${base}vehicle_logs/${fileName}`,
     }));
+    return { vehicles };
+  };
+  const writeManifest = () => {
     writeFileSync(
       resolve(dir, "index.json"),
-      JSON.stringify({ vehicles }, null, 2) + "\n",
+      JSON.stringify(buildManifest(), null, 2) + "\n",
     );
   };
   return {
@@ -36,15 +39,18 @@ function vehicleManifestPlugin(): Plugin {
       writeManifest();
     },
     configureServer(server) {
-      writeManifest();
-      server.watcher.add(dir);
-      const onChange = (file: string) => {
-        if (file.startsWith(dir) && extname(file).toLowerCase() === ".csv") {
-          writeManifest();
-        }
-      };
-      server.watcher.on("add", onChange);
-      server.watcher.on("unlink", onChange);
+      // Vite 8's dev server serves `public/**/*.json` via the SPA HTML
+      // fallback instead of the static file, so a plain <base>/vehicle_logs/
+      // index.json request returns index.html and JSON.parse blows up.
+      // Serve the manifest from a middleware so the dev flow doesn't depend
+      // on static-file handling.
+      const manifestPath = `${base}vehicle_logs/index.json`;
+      server.middlewares.use(manifestPath, (req, res, next) => {
+        if (req.method !== "GET" && req.method !== "HEAD") return next();
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+        res.setHeader("Cache-Control", "no-store");
+        res.end(JSON.stringify(buildManifest(), null, 2) + "\n");
+      });
     },
   };
 }
