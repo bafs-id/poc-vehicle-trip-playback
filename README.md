@@ -1,4 +1,4 @@
-# poc-vehicle-route
+# poc-vehicle-trip-playback
 
 A single-page React app that visualizes a vehicle's GPS history on a Leaflet map, detects speeding events, and lets you scrub/play the journey along a timeline.
 
@@ -10,6 +10,7 @@ A single-page React app that visualizes a vehicle's GPS history on a Leaflet map
 - Renders the route on a Leaflet map: blue polyline + red speeding sub-runs + start/end markers + event markers + a moving playhead.
 - Filter by date, click a trip, adjust the speed threshold, scrub the timeline, and play at 1× / 2× / 4× / 8× / 16×.
 - Fly the map to any speeding event.
+- Selected vehicle is reflected in the URL path (e.g. `…/ZS-47`) with browser back/forward support.
 
 ## Tech stack
 
@@ -35,7 +36,7 @@ npm install
 npm run dev
 ```
 
-Then open the URL Vite prints (usually http://localhost:5173).
+Then open the URL Vite prints. The app is served under the `base` path configured in [vite.config.ts](vite.config.ts) (currently `/poc/vehicle-trip-placback/`), so the dev URL looks like `http://localhost:5173/poc/vehicle-trip-placback/`.
 
 ## Scripts
 
@@ -46,12 +47,11 @@ Then open the URL Vite prints (usually http://localhost:5173).
 
 ## Data
 
-Vehicle logs live in [public/vehicle_logs/](public/vehicle_logs/). [index.json](public/vehicle_logs/index.json) lists the available vehicles; each entry points at a CSV served from the same directory. The loader only reads `Latitude`, `Longitude`, and `CreatedDate` columns — other columns are ignored.
+Vehicle logs live in [public/vehicle_logs/](public/vehicle_logs/). The app discovers them via [index.json](public/vehicle_logs/index.json), which is **auto-generated** at dev/build start by the `vehicleManifestPlugin` in [vite.config.ts](vite.config.ts): the plugin scans the directory for `*.csv` and writes the manifest (id = filename without extension, plus the public URL). In dev, the manifest is also served fresh from middleware, so edits during a running dev session are picked up on reload.
 
-To add a new vehicle:
+The loader only reads the `Latitude`, `Longitude`, and `CreatedDate` columns — other columns are ignored. Timestamps like `2026-04-22 07:00:00.0412456 +07:00` are normalized to ISO 8601 before parsing.
 
-1. Drop its CSV into [public/vehicle_logs/](public/vehicle_logs/).
-2. Add an entry to [index.json](public/vehicle_logs/index.json) with a unique `id`, the `fileName`, and its `url`.
+To add a new vehicle: drop its CSV into [public/vehicle_logs/](public/vehicle_logs/) and restart (or re-run) Vite. No manual edits to `index.json` required — it's regenerated on the next build/dev start.
 
 ## Project layout
 
