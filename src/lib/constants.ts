@@ -6,6 +6,22 @@ export const DEFAULT_SPEED_THRESHOLD_KMH = 50;
 /** Implausible speed cap (km/h). Anything above this is considered a GPS jump. */
 export const OUTLIER_SPEED_KMH = 250;
 
+/**
+ * Out-and-back GPS spike detection. For an interior point B between
+ * neighbors A and C, B is treated as a spike when
+ * `haversine(A, C) / (haversine(A, B) + haversine(B, C)) < SPIKE_RETURN_RATIO`
+ * (i.e. the detour to B is much longer than the direct A→C path) AND both
+ * legs are at least `SPIKE_MIN_LEG_M` long.
+ */
+export const SPIKE_RETURN_RATIO = 0.3;
+export const SPIKE_MIN_LEG_M = 80;
+
+/** Tighter speed-based spike cap (km/h) used during cleaning. */
+export const SPIKE_SPEED_KMH = 150;
+
+/** Maximum number of cleaning passes when removing GPS spikes. */
+export const MAX_SPIKE_PASSES = 3;
+
 /** Earth radius in meters (mean), used by the Haversine formula. */
 export const EARTH_RADIUS_M = 6_371_000;
 
