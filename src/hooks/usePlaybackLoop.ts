@@ -8,7 +8,10 @@ import { useFilteredPoints } from "../store/selectors";
  * and the playhead jumps to the latest point whose timestamp ≤ the clock.
  *
  * The loop re-anchors whenever `points` identity changes (e.g. date or trip
- * selection) and pauses automatically on reaching the last point.
+ * selection) and pauses automatically on reaching the last point. It also
+ * re-anchors mid-tick when it detects the playhead was moved externally
+ * (e.g. scrubber drag) so playback resumes from the new position instead
+ * of stalling on a stale virtual clock.
  *
  * `playheadIndex` is intentionally NOT a dependency of the effect — we read
  * the latest value via `getPlayheadIndex` to avoid restarting the rAF loop
@@ -25,6 +28,7 @@ export function usePlaybackLoop() {
   const rafRef = useRef<number | null>(null);
   const lastTickRef = useRef<number | null>(null);
   const virtualMsRef = useRef<number>(0);
+  const lastSetIndexRef = useRef<number>(0);
 
   useEffect(() => {
     if (!isPlaying || points.length < 2) {
@@ -33,17 +37,27 @@ export function usePlaybackLoop() {
     }
 
     // Anchor the virtual clock at the playhead's timestamp.
-    const anchor = points[Math.min(playheadIndex, points.length - 1)];
-    virtualMsRef.current = anchor.timestamp.getTime();
+    const anchorIdx = Math.min(playheadIndex, points.length - 1);
+    virtualMsRef.current = points[anchorIdx].timestamp.getTime();
+    lastSetIndexRef.current = anchorIdx;
 
     const tick = (now: number) => {
       if (lastTickRef.current == null) lastTickRef.current = now;
       const realDelta = now - lastTickRef.current;
       lastTickRef.current = now;
+
+      // If the playhead was moved externally since our last tick (e.g. the
+      // user dragged the scrubber), re-anchor the virtual clock so playback
+      // resumes from the new position.
+      let i = getPlayheadIndex();
+      if (i !== lastSetIndexRef.current) {
+        virtualMsRef.current =
+          points[Math.min(i, points.length - 1)].timestamp.getTime();
+      }
+
       virtualMsRef.current += realDelta * playbackRate;
 
       // Advance to the last point with timestamp ≤ virtual clock.
-      let i = getPlayheadIndex();
       while (
         i + 1 < points.length &&
         points[i + 1].timestamp.getTime() <= virtualMsRef.current
@@ -51,6 +65,7 @@ export function usePlaybackLoop() {
         i++;
       }
       if (i !== getPlayheadIndex()) setPlayheadIndex(i);
+      lastSetIndexRef.current = i;
 
       if (i >= points.length - 1) {
         pause();
