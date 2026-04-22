@@ -1,20 +1,26 @@
 import { create } from "zustand";
-import { useShallow } from "zustand/react/shallow";
 import type {
-  LoadStatus,
+  FlyToTarget,
+  LoadState,
   Point,
   RawPoint,
   SpeedingEvent,
   Trip,
 } from "../types";
+import {
+  DEFAULT_PLAYBACK_RATE,
+  DEFAULT_SPEED_THRESHOLD_KMH,
+  MAP_FLY_TO_ZOOM,
+  type PlaybackRate,
+} from "../lib/constants";
+import { toLocalDateString } from "../lib/date";
 import { loadVehicleCsv } from "../lib/loadCsv";
 import { processPoints } from "../lib/processPoints";
 import { segmentTrips } from "../lib/segmentTrips";
 import { buildSpeedingEvents } from "../lib/speedingEvents";
 
-type State = {
-  loadStatus: LoadStatus;
-  errorMessage: string | null;
+export type RouteState = {
+  loadState: LoadState;
   raw: RawPoint[];
   allPoints: Point[];
   trips: Trip[];
@@ -26,19 +32,21 @@ type State = {
   thresholdKmh: number;
 
   isPlaying: boolean;
-  playbackRate: number;
-  playheadIndex: number; // index into the FILTERED point list
+  playbackRate: PlaybackRate;
+  /** index into the FILTERED point list */
+  playheadIndex: number;
 
   selectedTripId: string | null;
   selectedEventId: string | null;
-  /** bumped whenever map should re-fit bounds */
+
+  /** monotonic counter — bumped to ask the map to re-fit bounds */
   fitBoundsToken: number;
-  /** bumped when map should fly to a specific lat/lng */
+  /** monotonic counter — bumped to ask the map to fly to `flyToTarget` */
   flyToToken: number;
-  flyToTarget: { lat: number; lng: number; zoom?: number } | null;
+  flyToTarget: FlyToTarget | null;
 };
 
-type Actions = {
+export type RouteActions = {
   loadData: () => Promise<void>;
   setDate: (d: string | null) => void;
   setThreshold: (n: number) => void;
@@ -46,17 +54,16 @@ type Actions = {
   pause: () => void;
   togglePlay: () => void;
   setPlayheadIndex: (i: number) => void;
-  setPlaybackRate: (r: number) => void;
+  setPlaybackRate: (r: PlaybackRate) => void;
   selectTrip: (id: string | null) => void;
   selectEvent: (id: string | null) => void;
   requestFitBounds: () => void;
 };
 
-const DEFAULT_THRESHOLD = 50;
+export type RouteStore = RouteState & RouteActions;
 
-export const useRouteStore = create<State & Actions>((set, get) => ({
-  loadStatus: "idle",
-  errorMessage: null,
+export const useRouteStore = create<RouteStore>((set, get) => ({
+  loadState: { status: "idle" },
   raw: [],
   allPoints: [],
   trips: [],
@@ -64,10 +71,10 @@ export const useRouteStore = create<State & Actions>((set, get) => ({
 
   date: null,
   availableDates: [],
-  thresholdKmh: DEFAULT_THRESHOLD,
+  thresholdKmh: DEFAULT_SPEED_THRESHOLD_KMH,
 
   isPlaying: false,
-  playbackRate: 4,
+  playbackRate: DEFAULT_PLAYBACK_RATE,
   playheadIndex: 0,
 
   selectedTripId: null,
@@ -77,7 +84,10 @@ export const useRouteStore = create<State & Actions>((set, get) => ({
   flyToTarget: null,
 
   loadData: async () => {
-    set({ loadStatus: "loading", errorMessage: null });
+    // Guard against React 19 StrictMode double-invocation: skip if a load
+    // is already in progress.
+    if (get().loadState.status === "loading") return;
+    set({ loadState: { status: "loading" } });
     try {
       const raw = await loadVehicleCsv();
       const points = processPoints(raw, get().thresholdKmh);
@@ -85,28 +95,23 @@ export const useRouteStore = create<State & Actions>((set, get) => ({
       const events = buildSpeedingEvents(points);
       const dates = uniqueDates(raw);
       const initialDate = dates[dates.length - 1] ?? null;
-      const tripsOnInitialDate = initialDate
-        ? trips.filter((t) => tripOnDate(t, initialDate))
-        : trips;
-      const lastTrip =
-        tripsOnInitialDate[tripsOnInitialDate.length - 1] ?? null;
-      set({
-        loadStatus: "ready",
+      const lastTripOnDate = lastTripFor(trips, initialDate);
+      set((s) => ({
+        loadState: { status: "ready" },
         raw,
         allPoints: points,
         trips,
         speedingEvents: events,
         availableDates: dates,
         date: initialDate,
-        selectedTripId: lastTrip?.id ?? null,
+        selectedTripId: lastTripOnDate?.id ?? null,
         playheadIndex: 0,
-        fitBoundsToken: get().fitBoundsToken + 1,
-      });
+        isPlaying: points.length < 2 ? false : s.isPlaying,
+        fitBoundsToken: s.fitBoundsToken + 1,
+      }));
     } catch (err) {
-      set({
-        loadStatus: "error",
-        errorMessage: err instanceof Error ? err.message : String(err),
-      });
+      const message = err instanceof Error ? err.message : String(err);
+      set({ loadState: { status: "error", message } });
     }
   },
 
@@ -122,7 +127,7 @@ export const useRouteStore = create<State & Actions>((set, get) => ({
   setThreshold: (n) => {
     const thresholdKmh = Number.isFinite(n)
       ? Math.max(1, n)
-      : DEFAULT_THRESHOLD;
+      : DEFAULT_SPEED_THRESHOLD_KMH;
     const points = processPoints(get().raw, thresholdKmh);
     set((s) => ({
       thresholdKmh,
@@ -145,6 +150,7 @@ export const useRouteStore = create<State & Actions>((set, get) => ({
     if (id === null) {
       set((s) => ({
         selectedTripId: null,
+        selectedEventId: null,
         playheadIndex: 0,
         isPlaying: false,
         fitBoundsToken: s.fitBoundsToken + 1,
@@ -153,11 +159,10 @@ export const useRouteStore = create<State & Actions>((set, get) => ({
     }
     const trip = get().trips.find((t) => t.id === id);
     if (!trip) return;
-    const dateStr = toLocalDateString(trip.startTime);
     set((s) => ({
       selectedTripId: id,
       selectedEventId: null,
-      date: dateStr,
+      date: toLocalDateString(trip.startTime),
       playheadIndex: 0,
       isPlaying: false,
       fitBoundsToken: s.fitBoundsToken + 1,
@@ -169,102 +174,81 @@ export const useRouteStore = create<State & Actions>((set, get) => ({
       set({ selectedEventId: null });
       return;
     }
-    const evt = get().speedingEvents.find((e) => e.id === id);
-    if (!evt) return;
-    // ensure the event's day is selected; keep current trip selection if the
-    // event lies inside it, otherwise clear it so the event isn't hidden.
-    const dateStr = toLocalDateString(evt.startTime);
-    const currentTrip = getSelectedTrip(get());
-    const tripCovers =
-      currentTrip != null &&
-      evt.startIndex >= currentTrip.startIndex &&
-      evt.endIndex <= currentTrip.endIndex;
-    set({
-      date: dateStr,
-      selectedTripId: tripCovers ? get().selectedTripId : null,
+    set((s) => {
+      const evt = s.speedingEvents.find((e) => e.id === id);
+      if (!evt) return s;
+
+      // Keep current trip selection only if the event lies inside it,
+      // otherwise clear it so the event isn't filtered out.
+      const currentTrip = findTrip(s.trips, s.selectedTripId);
+      const keepTrip =
+        currentTrip != null && tripContainsEvent(currentTrip, evt);
+      const nextTripId = keepTrip ? s.selectedTripId : null;
+      const nextDate = toLocalDateString(evt.startTime);
+
+      // Compute the playhead position against the about-to-be-filtered list.
+      const filtered = filterPointsRaw(
+        s.allPoints,
+        nextDate,
+        keepTrip ? currentTrip : null,
+      );
+      const playIdx = Math.max(
+        0,
+        filtered.findIndex((p) => p.index >= evt.startIndex),
+      );
+
+      return {
+        date: nextDate,
+        selectedTripId: nextTripId,
+        selectedEventId: id,
+        playheadIndex: playIdx,
+        isPlaying: false,
+        flyToToken: s.flyToToken + 1,
+        flyToTarget: {
+          lat: evt.midLat,
+          lng: evt.midLng,
+          zoom: MAP_FLY_TO_ZOOM,
+        },
+      };
     });
-    const refreshed = computeFilteredPoints(get());
-    const playIdx = Math.max(
-      0,
-      refreshed.findIndex((p) => p.index >= evt.startIndex),
-    );
-    set((s) => ({
-      selectedEventId: id,
-      playheadIndex: playIdx,
-      isPlaying: false,
-      flyToToken: s.flyToToken + 1,
-      flyToTarget: { lat: evt.midLat, lng: evt.midLng, zoom: 17 },
-    }));
   },
 
   requestFitBounds: () =>
     set((s) => ({ fitBoundsToken: s.fitBoundsToken + 1 })),
 }));
 
-// ---------- selectors ----------
+// ---------- internal helpers ----------
+// Exported so selectors.ts can reuse them; not part of the public API.
 
-/** Points currently shown on the map: by date, narrowed to selected trip if any. */
-export function useFilteredPoints() {
-  return useRouteStore(
-    useShallow((s) => filterPoints(s.allPoints, s.date, getSelectedTrip(s))),
+export function findTrip(trips: Trip[], id: string | null): Trip | null {
+  if (!id) return null;
+  return trips.find((t) => t.id === id) ?? null;
+}
+
+export function tripContainsEvent(trip: Trip, evt: SpeedingEvent): boolean {
+  return evt.startIndex >= trip.startIndex && evt.endIndex <= trip.endIndex;
+}
+
+export function tripOnDate(t: Trip, date: string | null): boolean {
+  if (!date) return true;
+  return (
+    toLocalDateString(t.startTime) === date ||
+    toLocalDateString(t.endTime) === date
   );
 }
 
-/** All trips for the selected date (no time-range filter). */
-export function useVisibleTrips() {
-  return useRouteStore(
-    useShallow((s) => s.trips.filter((t) => tripOnDate(t, s.date))),
-  );
-}
-
-/** Speeding events for the selected date, narrowed to selected trip if any. */
-export function useVisibleSpeedingEvents() {
-  return useRouteStore(
-    useShallow((s) => {
-      const trip = getSelectedTrip(s);
-      return s.speedingEvents.filter((e) => {
-        if (s.date && toLocalDateString(e.startTime) !== s.date) return false;
-        if (
-          trip &&
-          (e.startIndex < trip.startIndex || e.endIndex > trip.endIndex)
-        )
-          return false;
-        return true;
-      });
-    }),
-  );
-}
-
-// ---------- helpers ----------
-
-function getSelectedTrip(s: State): Trip | null {
-  if (!s.selectedTripId) return null;
-  return s.trips.find((t) => t.id === s.selectedTripId) ?? null;
-}
-
-function computeFilteredPoints(s: State): Point[] {
-  return filterPoints(s.allPoints, s.date, getSelectedTrip(s));
-}
-
-export function filterPoints(
+export function filterPointsRaw(
   points: Point[],
   date: string | null,
   trip: Trip | null,
 ): Point[] {
   return points.filter((p) => {
     if (date && toLocalDateString(p.timestamp) !== date) return false;
-    if (trip && (p.index < trip.startIndex || p.index > trip.endIndex))
+    if (trip && (p.index < trip.startIndex || p.index > trip.endIndex)) {
       return false;
+    }
     return true;
   });
-}
-
-function tripOnDate(t: Trip, date: string | null): boolean {
-  if (!date) return true;
-  return (
-    toLocalDateString(t.startTime) === date ||
-    toLocalDateString(t.endTime) === date
-  );
 }
 
 function uniqueDates(raw: RawPoint[]): string[] {
@@ -273,13 +257,7 @@ function uniqueDates(raw: RawPoint[]): string[] {
   return [...set].sort();
 }
 
-export function toLocalDateString(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-export function minutesOfDay(d: Date): number {
-  return d.getHours() * 60 + d.getMinutes();
+function lastTripFor(trips: Trip[], date: string | null): Trip | null {
+  const onDate = date ? trips.filter((t) => tripOnDate(t, date)) : trips;
+  return onDate[onDate.length - 1] ?? null;
 }

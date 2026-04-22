@@ -1,14 +1,28 @@
+import { useShallow } from "zustand/react/shallow";
 import { useRouteStore } from "../store/useRouteStore";
 
 export function Header() {
-  const date = useRouteStore((s) => s.date);
-  const availableDates = useRouteStore((s) => s.availableDates);
-  const setDate = useRouteStore((s) => s.setDate);
-  const threshold = useRouteStore((s) => s.thresholdKmh);
-  const setThreshold = useRouteStore((s) => s.setThreshold);
-  const loadStatus = useRouteStore((s) => s.loadStatus);
-  const selectedTripId = useRouteStore((s) => s.selectedTripId);
-  const selectTrip = useRouteStore((s) => s.selectTrip);
+  const {
+    date,
+    availableDates,
+    setDate,
+    threshold,
+    setThreshold,
+    loadState,
+    selectedTripId,
+    selectTrip,
+  } = useRouteStore(
+    useShallow((s) => ({
+      date: s.date,
+      availableDates: s.availableDates,
+      setDate: s.setDate,
+      threshold: s.thresholdKmh,
+      setThreshold: s.setThreshold,
+      loadState: s.loadState,
+      selectedTripId: s.selectedTripId,
+      selectTrip: s.selectTrip,
+    })),
+  );
 
   return (
     <header className="app-header">
@@ -50,9 +64,13 @@ export function Header() {
       </div>
 
       <div className="status">
-        {loadStatus === "loading" && <span>Loading…</span>}
-        {loadStatus === "error" && <span className="status--err">Error</span>}
-        {loadStatus === "ready" && <span className="status--ok">Ready</span>}
+        {loadState.status === "loading" && <span>Loading…</span>}
+        {loadState.status === "error" && (
+          <span className="status--err">Error</span>
+        )}
+        {loadState.status === "ready" && (
+          <span className="status--ok">Ready</span>
+        )}
       </div>
     </header>
   );

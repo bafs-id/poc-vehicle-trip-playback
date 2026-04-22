@@ -1,37 +1,42 @@
 import { useState } from "react";
+import { useShallow } from "zustand/react/shallow";
+import { clsx } from "../lib/clsx";
 import {
-  useRouteStore,
-  useVisibleSpeedingEvents,
-  useVisibleTrips,
-} from "../store/useRouteStore";
+  formatDurationSeconds,
+  formatEventDistance,
+  formatTime,
+} from "../lib/format";
+import { useRouteStore } from "../store/useRouteStore";
+import { useVisibleSpeedingEvents, useVisibleTrips } from "../store/selectors";
+import type { SpeedingEvent, Trip } from "../types";
 
-const fmtTime = (d: Date) =>
-  d.toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
+type Tab = "trips" | "speeding";
 
 export function Sidebar() {
-  const [tab, setTab] = useState<"trips" | "speeding">("trips");
+  const [tab, setTab] = useState<Tab>("trips");
   const trips = useVisibleTrips();
   const events = useVisibleSpeedingEvents();
-  const selectTrip = useRouteStore((s) => s.selectTrip);
-  const selectEvent = useRouteStore((s) => s.selectEvent);
-  const selectedTripId = useRouteStore((s) => s.selectedTripId);
-  const selectedEventId = useRouteStore((s) => s.selectedEventId);
+  const { selectTrip, selectEvent, selectedTripId, selectedEventId } =
+    useRouteStore(
+      useShallow((s) => ({
+        selectTrip: s.selectTrip,
+        selectEvent: s.selectEvent,
+        selectedTripId: s.selectedTripId,
+        selectedEventId: s.selectedEventId,
+      })),
+    );
 
   return (
     <aside className="sidebar">
       <div className="tabs">
         <button
-          className={tab === "trips" ? "tab active" : "tab"}
+          className={clsx("tab", tab === "trips" && "active")}
           onClick={() => setTab("trips")}
         >
           Trips <span className="badge">{trips.length}</span>
         </button>
         <button
-          className={tab === "speeding" ? "tab active" : "tab"}
+          className={clsx("tab", tab === "speeding" && "active")}
           onClick={() => setTab("speeding")}
         >
           Speeding <span className="badge badge--red">{events.length}</span>
@@ -45,28 +50,12 @@ export function Sidebar() {
               <li className="empty">No trips in this window.</li>
             )}
             {trips.map((t) => (
-              <li
+              <TripRow
                 key={t.id}
-                className={
-                  "list-item " + (selectedTripId === t.id ? "is-selected" : "")
-                }
-                onClick={() => selectTrip(t.id)}
-              >
-                <div className="row">
-                  <strong>
-                    {fmtTime(t.startTime)} – {fmtTime(t.endTime)}
-                  </strong>
-                  {t.speedingCount > 0 && (
-                    <span className="badge badge--red">
-                      {t.speedingCount} over
-                    </span>
-                  )}
-                </div>
-                <div className="meta">
-                  {t.distanceKm.toFixed(2)} km · max {t.maxSpeedKmh.toFixed(0)}{" "}
-                  km/h · avg {t.avgSpeedKmh.toFixed(0)} km/h
-                </div>
-              </li>
+                trip={t}
+                selected={selectedTripId === t.id}
+                onSelect={() => selectTrip(t.id)}
+              />
             ))}
           </ul>
         )}
@@ -77,33 +66,75 @@ export function Sidebar() {
               <li className="empty">No over-speed events in this window.</li>
             )}
             {events.map((e) => (
-              <li
+              <EventRow
                 key={e.id}
-                className={
-                  "list-item " + (selectedEventId === e.id ? "is-selected" : "")
-                }
-                onClick={() => selectEvent(e.id)}
-              >
-                <div className="row">
-                  <strong>{fmtTime(e.startTime)}</strong>
-                  <span className="badge badge--red">
-                    {e.peakSpeedKmh.toFixed(0)} km/h
-                  </span>
-                </div>
-                <div className="meta">
-                  {Math.max(
-                    1,
-                    Math.round(
-                      (e.endTime.getTime() - e.startTime.getTime()) / 1000,
-                    ),
-                  )}
-                  s · {(e.distanceKm * 1000).toFixed(0)} m
-                </div>
-              </li>
+                event={e}
+                selected={selectedEventId === e.id}
+                onSelect={() => selectEvent(e.id)}
+              />
             ))}
           </ul>
         )}
       </div>
     </aside>
+  );
+}
+
+function TripRow({
+  trip,
+  selected,
+  onSelect,
+}: {
+  trip: Trip;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <li
+      className={clsx("list-item", selected && "is-selected")}
+      onClick={onSelect}
+    >
+      <div className="row">
+        <strong>
+          {formatTime(trip.startTime)} – {formatTime(trip.endTime)}
+        </strong>
+        {trip.speedingCount > 0 && (
+          <span className="badge badge--red">{trip.speedingCount} over</span>
+        )}
+      </div>
+      <div className="meta">
+        {trip.distanceKm.toFixed(2)} km · max {trip.maxSpeedKmh.toFixed(0)} km/h
+        · avg {trip.avgSpeedKmh.toFixed(0)} km/h
+      </div>
+    </li>
+  );
+}
+
+function EventRow({
+  event,
+  selected,
+  onSelect,
+}: {
+  event: SpeedingEvent;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const durationMs = event.endTime.getTime() - event.startTime.getTime();
+  return (
+    <li
+      className={clsx("list-item", selected && "is-selected")}
+      onClick={onSelect}
+    >
+      <div className="row">
+        <strong>{formatTime(event.startTime)}</strong>
+        <span className="badge badge--red">
+          {event.peakSpeedKmh.toFixed(0)} km/h
+        </span>
+      </div>
+      <div className="meta">
+        {formatDurationSeconds(durationMs)} ·{" "}
+        {formatEventDistance(event.distanceKm)}
+      </div>
+    </li>
   );
 }

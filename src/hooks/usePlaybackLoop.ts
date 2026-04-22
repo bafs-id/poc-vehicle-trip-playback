@@ -1,13 +1,18 @@
 import { useEffect, useRef } from "react";
 import { useRouteStore } from "../store/useRouteStore";
-import { useFilteredPoints } from "../store/useRouteStore";
+import { useFilteredPoints } from "../store/selectors";
 
 /**
- * Drives the playhead based on real timestamps so playback respects gaps in
- * the data: rate * realElapsedMs is added to a virtual playback clock and
- * the playhead advances to the latest point whose timestamp <= clock.
+ * Drives the playhead from a virtual playback clock that respects gaps in
+ * the data: each animation frame the clock advances by `realDelta * rate`
+ * and the playhead jumps to the latest point whose timestamp ≤ the clock.
  *
- * When the playhead reaches the end the loop pauses.
+ * The loop re-anchors whenever `points` identity changes (e.g. date or trip
+ * selection) and pauses automatically on reaching the last point.
+ *
+ * `playheadIndex` is intentionally NOT a dependency of the effect — we read
+ * the latest value via `getPlayheadIndex` to avoid restarting the rAF loop
+ * on every advance.
  */
 export function usePlaybackLoop() {
   const isPlaying = useRouteStore((s) => s.isPlaying);
@@ -23,13 +28,11 @@ export function usePlaybackLoop() {
 
   useEffect(() => {
     if (!isPlaying || points.length < 2) {
-      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-      lastTickRef.current = null;
+      cancelLoop(rafRef, lastTickRef);
       return;
     }
 
-    // anchor virtual clock at the playhead's timestamp
+    // Anchor the virtual clock at the playhead's timestamp.
     const anchor = points[Math.min(playheadIndex, points.length - 1)];
     virtualMsRef.current = anchor.timestamp.getTime();
 
@@ -39,15 +42,15 @@ export function usePlaybackLoop() {
       lastTickRef.current = now;
       virtualMsRef.current += realDelta * playbackRate;
 
-      // advance to the last point with timestamp <= virtual clock
-      let i = playheadIndexLatest();
+      // Advance to the last point with timestamp ≤ virtual clock.
+      let i = getPlayheadIndex();
       while (
         i + 1 < points.length &&
         points[i + 1].timestamp.getTime() <= virtualMsRef.current
       ) {
         i++;
       }
-      if (i !== playheadIndexLatest()) setPlayheadIndex(i);
+      if (i !== getPlayheadIndex()) setPlayheadIndex(i);
 
       if (i >= points.length - 1) {
         pause();
@@ -57,17 +60,21 @@ export function usePlaybackLoop() {
     };
 
     rafRef.current = requestAnimationFrame(tick);
-    return () => {
-      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-      lastTickRef.current = null;
-    };
-    // re-run when these change; playheadIndex intentionally NOT in deps to
-    // avoid restarting the loop on every advance.
+    return () => cancelLoop(rafRef, lastTickRef);
+    // playheadIndex intentionally NOT in deps — see JSDoc.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPlaying, playbackRate, points]);
 }
 
-function playheadIndexLatest(): number {
+function cancelLoop(
+  rafRef: React.RefObject<number | null>,
+  lastTickRef: React.RefObject<number | null>,
+) {
+  if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+  rafRef.current = null;
+  lastTickRef.current = null;
+}
+
+function getPlayheadIndex(): number {
   return useRouteStore.getState().playheadIndex;
 }

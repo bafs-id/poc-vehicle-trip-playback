@@ -1,11 +1,10 @@
-const R = 6371000; // earth radius in meters
+import type { LatLng } from "../types";
+import { EARTH_RADIUS_M } from "./constants";
 
-const toRad = (d: number) => (d * Math.PI) / 180;
+const toRad = (deg: number) => (deg * Math.PI) / 180;
 
-export function haversineMeters(
-  a: { lat: number; lng: number },
-  b: { lat: number; lng: number },
-): number {
+/** Great-circle distance in meters between two lat/lng points. */
+export function haversineMeters(a: LatLng, b: LatLng): number {
   const dLat = toRad(b.lat - a.lat);
   const dLng = toRad(b.lng - a.lng);
   const lat1 = toRad(a.lat);
@@ -13,5 +12,5 @@ export function haversineMeters(
   const h =
     Math.sin(dLat / 2) ** 2 +
     Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+  return 2 * EARTH_RADIUS_M * Math.asin(Math.min(1, Math.sqrt(h)));
 }

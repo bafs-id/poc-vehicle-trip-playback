@@ -1,6 +1,9 @@
-export type RawPoint = {
+export type LatLng = {
   lat: number;
   lng: number;
+};
+
+export type RawPoint = LatLng & {
   timestamp: Date;
 };
 
@@ -43,4 +46,12 @@ export type SpeedingEvent = {
   midLng: number;
 };
 
-export type LoadStatus = "idle" | "loading" | "ready" | "error";
+/** Discriminated state for the initial CSV load. */
+export type LoadState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "ready" }
+  | { status: "error"; message: string };
+
+/** Target for an imperative map fly-to. */
+export type FlyToTarget = LatLng & { zoom?: number };

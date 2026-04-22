@@ -10,43 +10,23 @@ import {
 } from "react-leaflet";
 import L from "leaflet";
 import {
+  MAP_DEFAULT_ZOOM,
+  MAP_FALLBACK_CENTER,
+  MAP_FIT_MAX_ZOOM,
+  MAP_FIT_PADDING,
+} from "../lib/constants";
+import { formatDateTime, formatTime } from "../lib/format";
+import { endIcon, playheadIcon, startIcon } from "../lib/leafletIcons";
+import { useRouteStore } from "../store/useRouteStore";
+import {
   useFilteredPoints,
-  useRouteStore,
   useVisibleSpeedingEvents,
-} from "../store/useRouteStore";
-import type { Point } from "../types";
+} from "../store/selectors";
+import type { FlyToTarget, Point, SpeedingEvent } from "../types";
 
-// Fix default Leaflet marker assets (Vite-friendly: use CDN URLs)
-const DefaultIcon = L.icon({
-  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-  iconRetinaUrl:
-    "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41],
-});
-L.Marker.prototype.options.icon = DefaultIcon;
+type LatLngTuple = [number, number];
 
-const startIcon = L.divIcon({
-  className: "",
-  html: '<div class="map-pin map-pin--start">S</div>',
-  iconSize: [22, 22],
-  iconAnchor: [11, 11],
-});
-const endIcon = L.divIcon({
-  className: "",
-  html: '<div class="map-pin map-pin--end">E</div>',
-  iconSize: [22, 22],
-  iconAnchor: [11, 11],
-});
-const playheadIcon = L.divIcon({
-  className: "",
-  html: '<div class="map-pin map-pin--playhead"></div>',
-  iconSize: [16, 16],
-  iconAnchor: [8, 8],
-});
+const FLY_TO_DURATION_S = 0.8;
 
 export function RouteMap() {
   const points = useFilteredPoints();
@@ -56,24 +36,23 @@ export function RouteMap() {
   const flyToToken = useRouteStore((s) => s.flyToToken);
   const flyToTarget = useRouteStore((s) => s.flyToTarget);
 
-  const polyPath = useMemo(
-    () => points.map((p) => [p.lat, p.lng] as [number, number]),
+  const polyPath = useMemo<LatLngTuple[]>(
+    () => points.map((p) => [p.lat, p.lng]),
     [points],
   );
-
-  // build red sub-polylines for speeding segments
   const redSegments = useMemo(() => buildSpeedingSegments(points), [points]);
 
-  const initialCenter: [number, number] = points[0]
-    ? [points[0].lat, points[0].lng]
-    : [13.6844, 100.7437];
-
+  const first = points[0];
+  const last = points[points.length - 1];
+  const initialCenter: LatLngTuple = first
+    ? [first.lat, first.lng]
+    : [MAP_FALLBACK_CENTER.lat, MAP_FALLBACK_CENTER.lng];
   const playhead = points[Math.min(playheadIndex, points.length - 1)];
 
   return (
     <MapContainer
       center={initialCenter}
-      zoom={15}
+      zoom={MAP_DEFAULT_ZOOM}
       scrollWheelZoom
       style={{ width: "100%", height: "100%" }}
     >
@@ -89,30 +68,22 @@ export function RouteMap() {
         />
       )}
 
-      {redSegments.map((seg, i) => (
+      {redSegments.map((seg) => (
         <Polyline
-          key={i}
+          key={segmentKey(seg)}
           positions={seg}
           pathOptions={{ color: "#ef4444", weight: 6, opacity: 0.95 }}
         />
       ))}
 
-      {points[0] && (
-        <Marker position={[points[0].lat, points[0].lng]} icon={startIcon}>
-          <Popup>Start: {points[0].timestamp.toLocaleString()}</Popup>
+      {first && (
+        <Marker position={[first.lat, first.lng]} icon={startIcon}>
+          <Popup>Start: {formatDateTime(first.timestamp)}</Popup>
         </Marker>
       )}
-      {points.length > 1 && (
-        <Marker
-          position={[
-            points[points.length - 1].lat,
-            points[points.length - 1].lng,
-          ]}
-          icon={endIcon}
-        >
-          <Popup>
-            End: {points[points.length - 1].timestamp.toLocaleString()}
-          </Popup>
+      {last && points.length > 1 && (
+        <Marker position={[last.lat, last.lng]} icon={endIcon}>
+          <Popup>End: {formatDateTime(last.timestamp)}</Popup>
         </Marker>
       )}
 
@@ -128,14 +99,7 @@ export function RouteMap() {
           }}
         >
           <Popup>
-            <div>
-              <strong>Speeding</strong>
-              <br />
-              Peak: {e.peakSpeedKmh.toFixed(1)} km/h
-              <br />
-              {e.startTime.toLocaleTimeString()} –{" "}
-              {e.endTime.toLocaleTimeString()}
-            </div>
+            <EventPopupContent event={e} />
           </Popup>
         </CircleMarker>
       ))}
@@ -147,6 +111,18 @@ export function RouteMap() {
       <BoundsController points={points} token={fitBoundsToken} />
       <FlyToController token={flyToToken} target={flyToTarget} />
     </MapContainer>
+  );
+}
+
+function EventPopupContent({ event }: { event: SpeedingEvent }) {
+  return (
+    <div>
+      <strong>Speeding</strong>
+      <br />
+      Peak: {event.peakSpeedKmh.toFixed(1)} km/h
+      <br />
+      {formatTime(event.startTime)} – {formatTime(event.endTime)}
+    </div>
   );
 }
 
@@ -164,7 +140,10 @@ function BoundsController({
     lastTokenRef.current = token;
     if (points.length === 0) return;
     const bounds = L.latLngBounds(points.map((p) => [p.lat, p.lng]));
-    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 17 });
+    map.fitBounds(bounds, {
+      padding: MAP_FIT_PADDING,
+      maxZoom: MAP_FIT_MAX_ZOOM,
+    });
   }, [token, points, map]);
   return null;
 }
@@ -174,7 +153,7 @@ function FlyToController({
   target,
 }: {
   token: number;
-  target: { lat: number; lng: number; zoom?: number } | null;
+  target: FlyToTarget | null;
 }) {
   const map = useMap();
   const lastTokenRef = useRef<number>(-1);
@@ -182,28 +161,39 @@ function FlyToController({
     if (lastTokenRef.current === token) return;
     lastTokenRef.current = token;
     if (!target) return;
-    map.flyTo([target.lat, target.lng], target.zoom ?? 16, { duration: 0.8 });
+    map.flyTo([target.lat, target.lng], target.zoom ?? MAP_DEFAULT_ZOOM, {
+      duration: FLY_TO_DURATION_S,
+    });
   }, [token, target, map]);
   return null;
 }
 
-function buildSpeedingSegments(points: Point[]): [number, number][][] {
-  const segs: [number, number][][] = [];
-  let cur: [number, number][] = [];
+/**
+ * Walk the points and emit one polyline per run of `isSpeeding` points.
+ * Each emitted run includes the previous (non-speeding) point so the red
+ * segment renders an actual line rather than a single vertex.
+ */
+function buildSpeedingSegments(points: Point[]): LatLngTuple[][] {
+  const segments: LatLngTuple[][] = [];
+  let current: LatLngTuple[] = [];
   for (let i = 0; i < points.length; i++) {
     const p = points[i];
     if (p.isSpeeding) {
-      // include the previous point so the red segment renders an actual line
-      if (cur.length === 0 && i > 0) {
+      if (current.length === 0 && i > 0) {
         const prev = points[i - 1];
-        cur.push([prev.lat, prev.lng]);
+        current.push([prev.lat, prev.lng]);
       }
-      cur.push([p.lat, p.lng]);
-    } else if (cur.length > 0) {
-      segs.push(cur);
-      cur = [];
+      current.push([p.lat, p.lng]);
+    } else if (current.length > 0) {
+      segments.push(current);
+      current = [];
     }
   }
-  if (cur.length > 0) segs.push(cur);
-  return segs;
+  if (current.length > 0) segments.push(current);
+  return segments;
+}
+
+function segmentKey(seg: LatLngTuple[]): string {
+  const [a, b] = [seg[0], seg[seg.length - 1]];
+  return `${a[0]},${a[1]}-${b[0]},${b[1]}-${seg.length}`;
 }

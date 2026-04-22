@@ -7,17 +7,25 @@ type Row = {
   CreatedDate: string;
 };
 
+const DEFAULT_CSV_URL = "/vehicle_locations.csv";
+
+/** Fetch the vehicle CSV and return parsed points sorted by timestamp. */
 export async function loadVehicleCsv(
-  url = "/vehicle_locations.csv",
+  url: string = DEFAULT_CSV_URL,
 ): Promise<RawPoint[]> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to fetch CSV: ${res.status}`);
   const text = await res.text();
+  return parseVehicleCsv(text);
+}
 
-  const parsed = Papa.parse<Row>(text, {
-    header: true,
-    skipEmptyLines: true,
-  });
+/** Parse the vehicle CSV text into points sorted by timestamp. */
+export function parseVehicleCsv(text: string): RawPoint[] {
+  const parsed = Papa.parse<Row>(text, { header: true, skipEmptyLines: true });
+  if (parsed.errors.length > 0) {
+    const first = parsed.errors[0];
+    throw new Error(`CSV parse error: ${first.message} (row ${first.row})`);
+  }
 
   const points: RawPoint[] = [];
   for (const row of parsed.data) {
@@ -25,7 +33,7 @@ export async function loadVehicleCsv(
     const lng = Number(row.Longitude);
     const timestamp = parseTimestamp(row.CreatedDate);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
-    if (!timestamp || Number.isNaN(timestamp.getTime())) continue;
+    if (!timestamp) continue;
     points.push({ lat, lng, timestamp });
   }
 
@@ -33,18 +41,18 @@ export async function loadVehicleCsv(
   return points;
 }
 
+const TIMESTAMP_RE =
+  /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.(\d+))?\s*([+-]\d{2}:?\d{2}|Z)?$/;
+
 /**
  * The CSV uses ".NNNNNNN" sub-second precision plus a "+07:00" offset, e.g.
- * "2026-04-22 07:00:00.0412456 +07:00". Date can't parse that natively, so
- * normalize it to ISO 8601 first.
+ * "2026-04-22 07:00:00.0412456 +07:00". `Date` can't parse that natively, so
+ * normalize it to ISO 8601 first. Sub-millisecond precision is dropped.
  */
 function parseTimestamp(raw: string | undefined): Date | null {
   if (!raw) return null;
   const trimmed = raw.trim();
-  // "YYYY-MM-DD HH:MM:SS.fffffff +HH:MM"
-  const m = trimmed.match(
-    /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.(\d+))?\s*([+-]\d{2}:?\d{2}|Z)?$/,
-  );
+  const m = trimmed.match(TIMESTAMP_RE);
   if (!m) {
     const fallback = new Date(trimmed);
     return Number.isNaN(fallback.getTime()) ? null : fallback;
@@ -56,5 +64,6 @@ function parseTimestamp(raw: string | undefined): Date | null {
       ? "Z"
       : tz.replace(/^([+-]\d{2})(\d{2})$/, "$1:$2")
     : "Z";
-  return new Date(`${date}T${time}.${ms}${offset}`);
+  const d = new Date(`${date}T${time}.${ms}${offset}`);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
